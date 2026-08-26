@@ -17,61 +17,57 @@ interface AuthState {
   signOut: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  isAuthenticated: false,
-  isLoading: true,
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
-  checkAuth: async () => {
-    try {
-      set({ isLoading: true });
-
-      // 1. Check current session
-      const { data: { session }, error } = await supabase.auth.getSession();
-      
-      if (error) {
-        console.error('Error getting session:', error);
+export const useAuthStore = create<AuthState>((set) => {
+  // Configurar listener imediatamente na instanciação do store
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (session?.user) {
+      set({
+        user: {
+          id: session.user.id,
+          email: session.user.email || '',
+        },
+        isAuthenticated: true,
+        isLoading: false,
+      });
+      if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+        window.history.replaceState(null, '', window.location.pathname);
       }
+    } else {
+      set({ user: null, isAuthenticated: false, isLoading: false });
+    }
+  });
 
-      if (session?.user) {
-        set({
-          user: {
-            id: session.user.id,
-            email: session.user.email || '',
-          },
-          isAuthenticated: true,
-          isLoading: false,
-        });
-      } else {
-        set({ user: null, isAuthenticated: false, isLoading: false });
-      }
-
-      // 2. Listen for auth changes (including OAuth hash redirect callback)
-      supabase.auth.onAuthStateChange((event, newSession) => {
-        if (newSession?.user) {
+  return {
+    user: null,
+    isAuthenticated: false,
+    isLoading: true,
+    setUser: (user) => set({ user, isAuthenticated: !!user, isLoading: false }),
+    checkAuth: async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
           set({
             user: {
-              id: newSession.user.id,
-              email: newSession.user.email || '',
+              id: session.user.id,
+              email: session.user.email || '',
             },
             isAuthenticated: true,
             isLoading: false,
           });
-          // Clean hash from URL if present
-          if (window.location.hash.includes('access_token')) {
-            window.history.replaceState(null, '', window.location.pathname);
+        } else {
+          // Se não houver sessão ativa nem hash na URL, encerra o loading
+          if (typeof window !== 'undefined' && !window.location.hash.includes('access_token')) {
+            set({ user: null, isAuthenticated: false, isLoading: false });
           }
-        } else if (event === 'SIGNED_OUT') {
-          set({ user: null, isAuthenticated: false, isLoading: false });
         }
-      });
-    } catch (error) {
-      console.error('Error in checkAuth:', error);
+      } catch (error) {
+        console.error('Error in checkAuth:', error);
+        set({ user: null, isAuthenticated: false, isLoading: false });
+      }
+    },
+    signOut: async () => {
+      await supabase.auth.signOut();
       set({ user: null, isAuthenticated: false, isLoading: false });
-    }
-  },
-  signOut: async () => {
-    await supabase.auth.signOut();
-    set({ user: null, isAuthenticated: false });
-  },
-}));
+    },
+  };
+});
