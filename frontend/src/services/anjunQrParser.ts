@@ -2,6 +2,15 @@
  * ANJUN QR CODE PARSER
  * Parseia o QR code das etiquetas da Anjun Express (Shein, Temu, Shopee via Anjun).
  * O QR contém texto estruturado com dados de entrega.
+ *
+ * Formato típico Anjun/Shein multi-linha:
+ *   AJ26080910833010
+ *   Camille Walandorff
+ *   Rua Corruíras prédio cinza
+ *   170
+ *   R Corruíras/Campeche
+ *   Florianópolis/SC
+ *   CEP: 88063091
  */
 
 export interface ParsedAddress {
@@ -44,26 +53,19 @@ function extractUF(text: string): string | null {
 
 /**
  * Tenta parsear o conteúdo de um QR Code da Anjun Express
- * O conteúdo tipicamente tem este formato:
- * 
- * AJxxxxxxxxx\nNOME DO DESTINATÁRIO\nRua X, N - Bairro\nCidade/UF\nCEP: XXXXX-XXX
- * 
- * Ou pode ser JSON, ou texto livre de múltiplas linhas.
+ * Suporta múltiplos formatos: multi-linha sem labels, com labels (CEP:, Destinatário:), e JSON.
  */
 export function parseAnjunQR(raw: string): ParsedAddress | null {
   try {
-    // Tentar JSON primeiro
     const json = JSON.parse(raw);
     if (json.recipient || json.address || json.nome) {
       return parseFromJSON(json);
     }
-  } catch (_) {
-    // Não é JSON, continuar com texto
-  }
+  } catch (_) {}
 
-  // Limpar e dividir em linhas
   const lines = raw
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
@@ -72,98 +74,141 @@ export function parseAnjunQR(raw: string): ParsedAddress | null {
 
   const result: Partial<ParsedAddress> = { confidence: 0 };
 
-  // Extrair CEP de todas as linhas
+  // === PASSO 1: Leitura de campos com label (CEP:, Destinatário:, etc.) ===
   for (const line of lines) {
-    const cep = extractCep(line);
-    if (cep) {
-      result.zipCode = cep;
+    const cepLabel = line.match(/(?:cep|zip)[:\s]+(\d{5}-?\d{3})/i);
+    if (cepLabel) {
+      result.zipCode = cepLabel[1].replace(/(\d{5})(\d{3})$/, '$1-$2');
+      result.confidence = (result.confidence || 0) + 30;
+    }
+
+    const destLabel = line.match(/^destinat[aá]rio[:\s]+(.+)/i);
+    if (destLabel) {
+      result.recipientName = destLabel[1].trim();
       result.confidence = (result.confidence || 0) + 25;
-      break;
     }
   }
 
-  // Extrair UF
-  let ufLine = '';
-  for (const line of lines) {
-    const uf = extractUF(line);
-    if (uf) {
-      result.state = uf;
-      ufLine = line;
-      result.confidence = (result.confidence || 0) + 10;
-      break;
+  // === PASSO 2: Código de rastreio Anjun ===
+  const ajLineIdx = lines.findIndex(l => /^AJ\d{10,}/i.test(l));
+  const ajMatch = raw.match(/\bAJ\d{10,}\b/i);
+  if (ajMatch) {
+    result.trackingCode = ajMatch[0];
+    result.confidence = (result.confidence || 0) + 5;
+  }
+
+  // === PASSO 3: CEP (qualquer linha) ===
+  if (!result.zipCode) {
+    for (const line of lines) {
+      const cep = extractCep(line);
+      if (cep) {
+        result.zipCode = cep;
+        result.confidence = (result.confidence || 0) + 25;
+        break;
+      }
     }
   }
 
-  // Extrair cidade (última palavra antes do UF na linha que tem o estado)
-  if (ufLine && result.state) {
-    const cityMatch = ufLine.match(new RegExp(`([A-Za-zÀ-ÿ ]+?)[\s/,]+${result.state}`, 'i'));
+  // === PASSO 4: Linha Cidade/UF (ex: "Florianópolis/SC" ou "Florianópolis, SC") ===
+  let ufLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const uf = extractUF(lines[i]);
+    if (!uf) continue;
+
+    result.state = uf;
+    ufLineIdx = i;
+    result.confidence = (result.confidence || 0) + 10;
+
+    // Tenta extrair cidade (antes de "/" ou ",")
+    const cityMatch = lines[i].match(/^([^/,]+)[/,]/) ||
+                      lines[i].match(new RegExp(`(.+?)\\s+${uf}\\b`, 'i'));
     if (cityMatch) {
-      result.city = cityMatch[1].trim();
-      result.confidence = (result.confidence || 0) + 10;
-    }
-    // Fallback: última palavra antes da UF
-    if (!result.city) {
-      const beforeState = ufLine.split(/[\s/,]+/);
-      const stateIdx = beforeState.findIndex((w) => w.toUpperCase() === result.state);
-      if (stateIdx > 0) {
-        result.city = beforeState.slice(Math.max(0, stateIdx - 3), stateIdx).join(' ').trim();
-        if (result.city) result.confidence = (result.confidence || 0) + 10;
-      }
-    }
-  }
-
-  // Extrair número do endereço
-  let addressLine = '';
-  for (const line of lines) {
-    if (/\b\d{1,5}\b/.test(line) && line !== ufLine) {
-      const numMatch = line.match(/\b(\d{1,5})\b/);
-      if (numMatch) {
-        result.number = numMatch[1];
-        addressLine = line;
+      const cityCandidate = cityMatch[1].trim();
+      if (cityCandidate.length > 2 && !['R', 'Rua'].includes(cityCandidate)) {
+        result.city = cityCandidate;
         result.confidence = (result.confidence || 0) + 10;
-        break;
+      }
+    }
+    break;
+  }
+
+  // === PASSO 5: Bairro (linha imediatamente antes de Cidade/UF) ===
+  if (ufLineIdx > 0) {
+    const bairroLine = lines[ufLineIdx - 1];
+    if (bairroLine && !extractCep(bairroLine) && !/^AJ\d/i.test(bairroLine) && !/^\d{1,5}$/.test(bairroLine)) {
+      // Formato "R Corruíras/Campeche" ou "Campeche"
+      const parts = bairroLine.split('/');
+      let bairro = parts[parts.length - 1].trim();
+      bairro = bairro.replace(/^(r\.?\s+|rua\s+)/i, '').trim();
+      if (bairro.length > 2) {
+        result.neighborhood = bairro;
+        result.confidence = (result.confidence || 0) + 10;
       }
     }
   }
 
-  // Extrair rua/logradouro (linha do endereço sem número)
-  if (addressLine) {
-    let street = addressLine.replace(/\b\d{1,5}\b/, '').replace(/[,;-]/g, '').trim();
-    // Limpar palavras como "casa", "apto", etc.
-    street = street.replace(/\b(casa|apto|ap|bl|bloco|lote|loja|sl|sala)\b.*/i, '').trim();
-    if (street.length > 3) {
-      result.street = street;
+  // === PASSO 6: Número (linha que é só dígitos, ex: "170") ===
+  let numberLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (i === ufLineIdx) continue;
+    if (/^\d{1,5}[A-Za-z]?$/.test(lines[i])) {
+      result.number = lines[i].trim();
+      numberLineIdx = i;
       result.confidence = (result.confidence || 0) + 15;
-    }
-
-    // Extrair complemento
-    const compMatch = addressLine.match(/\b(casa|apto|ap|bl|bloco|lote)\s*\d+.*/i);
-    if (compMatch) {
-      result.complement = compMatch[0].trim();
+      break;
     }
   }
 
-  // Extrair bairro (palavra/frase após número, antes de cidade)
-  const neighborhoodCandidates = lines.filter(
-    (l) => l !== addressLine && l !== ufLine && !extractCep(l)
-  );
-  if (neighborhoodCandidates.length > 0) {
-    // Pegar linha que NÃO é o nome (geralmente mais curta e depois do endereço)
-    const lastLines = neighborhoodCandidates.slice(-2);
-    for (const l of lastLines) {
-      if (l.length > 3 && l.length < 50 && !l.match(/^AJ/i)) {
-        result.neighborhood = l.replace(/[,;]/g, '').trim();
-        result.confidence = (result.confidence || 0) + 10;
+  // === PASSO 7: Rua/Logradouro (linha antes do número, ou linha que começa com tipo de via) ===
+  if (!result.street) {
+    // Tenta linha explicitamente de logradouro
+    for (let i = 0; i < lines.length; i++) {
+      if (i === ufLineIdx || i === numberLineIdx) continue;
+      if (/^(rua|r\.|av\.|avenida|serv|servidao|travessa|rod\.|estrada|alameda|\d)/i.test(lines[i])) {
+        const streetLine = lines[i];
+        // Remover complemento da linha da rua (ex: "Rua Corruíras prédio cinza" → street = "Rua Corruíras", complement = "prédio cinza")
+        const compKeywords = /\b(pr[eé]dio|casa|apto|ap\.|bloco|bl\.|lote|fundos|kit\s*net|kitnet|sl\.|sala)\b/i;
+        const compMatch = streetLine.match(new RegExp(`(.+?)\\s+(${compKeywords.source}.*)`, 'i'));
+        if (compMatch) {
+          result.street = compMatch[1].trim();
+          if (!result.complement) result.complement = compMatch[2].trim();
+        } else {
+          result.street = streetLine.trim();
+        }
+        result.confidence = (result.confidence || 0) + 20;
         break;
+      }
+    }
+
+    // Fallback: linha imediatamente antes do número
+    if (!result.street && numberLineIdx > 0) {
+      const candidate = lines[numberLineIdx - 1];
+      if (candidate && !extractCep(candidate) && !/^AJ\d/i.test(candidate)) {
+        const isName = /^[A-ZÁÉÍÓÚ][a-záéíóú]+ [A-ZÁÉÍÓÚ]/.test(candidate) && candidate.split(' ').length <= 4;
+        if (!isName) {
+          result.street = candidate.trim();
+          result.confidence = (result.confidence || 0) + 15;
+        }
       }
     }
   }
 
-  // Extrair nome do destinatário (primeira linha que não seja código AJ)
-  for (const line of lines) {
-    if (!line.match(/^AJ\d/i) && !line.match(/^\d{5}/) && !extractCep(line)) {
-      // Parece ser um nome se tem letras e não é um endereço
-      if (/^[A-Za-zÀ-ÿ]/.test(line) && !line.match(/^(rua|av|avenida|est|rod|tv|travessa|servidao|serv)/i)) {
+  // === PASSO 8: Destinatário (primeira linha com nome após código AJ) ===
+  if (!result.recipientName) {
+    const startIdx = ajLineIdx >= 0 ? ajLineIdx + 1 : 0;
+    for (let i = startIdx; i < lines.length; i++) {
+      const line = lines[i];
+      if (
+        i === ufLineIdx || i === numberLineIdx ||
+        extractCep(line) ||
+        /^AJ\d/i.test(line) ||
+        /^(rua|av|serv|travessa|rod|estrada)/i.test(line) ||
+        line === result.street ||
+        line === result.neighborhood
+      ) continue;
+
+      // Nome: começa com maiúscula, pelo menos 2 palavras
+      if (/^[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÀÇ][a-záéíóúâêîôûãõàç]/.test(line) && line.includes(' ')) {
         result.recipientName = line.trim();
         result.confidence = (result.confidence || 0) + 20;
         break;
@@ -171,17 +216,17 @@ export function parseAnjunQR(raw: string): ParsedAddress | null {
     }
   }
 
-  // Extrair código de rastreio Anjun
-  const ajMatch = raw.match(/\bAJ\d{15,}\b/i);
-  if (ajMatch) {
-    result.trackingCode = ajMatch[0];
-  }
-
-  // Forçar defaults para campos vazios
+  // === Defaults e limpeza final ===
   result.complement = result.complement || '';
   result.neighborhood = result.neighborhood || '';
+  result.city = result.city || 'Florianópolis';
+  result.state = result.state || 'SC';
 
-  // Só retornar se temos pelo menos 3 campos preenchidos com confidence razoável
+  // Garantir que o número não está duplicado na rua
+  if (result.street && result.number) {
+    result.street = result.street.replace(new RegExp(`^${result.number}\\s*`), '').trim();
+  }
+
   if ((result.confidence || 0) < 30) return null;
 
   return result as ParsedAddress;
@@ -217,6 +262,7 @@ export function looksLikeAddressQR(text: string): boolean {
   // QR de endereço tem múltiplas linhas OU um CEP OU tem palavras-chave de endereço
   if (text.includes('\n')) return true;
   if (/\b\d{5}-?\d{3}\b/.test(text)) return true;
-  if (/\b(rua|av\.|avenida|servidao|travessa|alameda)\b/i.test(text)) return true;
+  if (/\b(rua|av\.|avenida|servidao|travessa|alameda|campeche|cep)\b/i.test(text)) return true;
+  if (/^AJ\d{10,}/i.test(text.split('\n')[0])) return true;
   return false;
 }
