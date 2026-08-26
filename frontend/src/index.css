@@ -17,20 +17,127 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: width var(--transition-normal);
-  z-index: 10;
+  transition: transform var(--transition-normal), width var(--transition-normal);
+  z-index: 50;
 }
 
 .sidebar-header {
   height: 64px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border);
   font-weight: 700;
   font-size: 1.25rem;
   color: var(--primary);
   gap: var(--space-2);
+}
+
+.sidebar-close-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-close-btn:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.mobile-menu-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-md);
+}
+
+.mobile-brand-title {
+  display: none;
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: -0.5px;
+  color: var(--primary);
+}
+
+.mobile-overlay {
+  display: none;
+}
+
+/* Responsividade Mobile (Telas até 768px) */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    box-shadow: 20px 0 50px rgba(0, 0, 0, 0.8);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-brand-title {
+    display: inline-block;
+  }
+
+  .mobile-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 40;
+  }
+
+  .topbar {
+    padding: 0 var(--space-3) !important;
+  }
+
+  .page-container {
+    padding: var(--space-3) !important;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: var(--space-3);
+  }
+
+  .page-header > div:last-child {
+    width: 100%;
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .page-header > div:last-child > button {
+    flex: 1;
+  }
 }
 
 .sidebar-nav {
@@ -151,6 +258,31 @@
   max-width: 400px;
   padding: var(--space-8);
   z-index: 1;
+}
+
+/* ==========================================================================
+   Triage Page Responsive Layout
+   ========================================================================== */
+.triage-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-6);
+  height: calc(100vh - 120px);
+}
+
+.triage-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow-y: auto;
+}
+
+@media (max-width: 1024px) {
+  .triage-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow-y: visible;
+  }
 }
 
 /* ==========================================================================

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/authStore';
 
 export const Layout: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuthStore();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -21,9 +22,21 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="layout-container animate-fade-in">
-      <Sidebar />
+      {/* Overlay para fechar menu no mobile */}
+      {mobileMenuOpen && (
+        <div 
+          className="mobile-overlay"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      <Sidebar 
+        isOpen={mobileMenuOpen} 
+        onClose={() => setMobileMenuOpen(false)} 
+      />
+
       <div className="main-content">
-        <Topbar />
+        <Topbar onToggleMenu={() => setMobileMenuOpen(!mobileMenuOpen)} />
         <main className="page-container">
           <Outlet />
         </main>

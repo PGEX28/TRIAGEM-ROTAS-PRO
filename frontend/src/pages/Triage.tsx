@@ -82,14 +82,9 @@ export const Triage: React.FC = () => {
   }
 
   return (
-    <div className="animate-fade-in" style={{ 
-      display: 'grid', 
-      gridTemplateColumns: '1fr 320px', 
-      gap: 'var(--space-6)', 
-      height: 'calc(100vh - 120px)' 
-    }}>
+    <div className="triage-layout animate-fade-in">
       {/* Left Column - Scanner & Packages */}
-      <div className="flex flex-col gap-4" style={{ overflowY: 'auto' }}>
+      <div className="triage-main-col">
         <div className="page-header" style={{ marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1>Triagem — {bag?.code}</h1>
