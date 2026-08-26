@@ -27,7 +27,7 @@ type ModalMode = 'qr_scan' | 'ocr_photo' | 'confirm' | 'manual';
 export const AddressModal: React.FC<AddressModalProps> = ({
   isOpen, onClose, onSaved, packageId, bagId,
 }) => {
-  const [mode, setMode] = useState<ModalMode>('qr_scan');
+  const [mode, setMode] = useState<ModalMode>('ocr_photo');
   const [loading, setLoading] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrStatus, setOcrStatus] = useState<string>('');
@@ -47,7 +47,8 @@ export const AddressModal: React.FC<AddressModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setFormData({ recipientName: '', zipCode: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '' });
-      setMode('qr_scan');
+      // Etiquetas Temu/Shein geralmente não armazenam endereço útil no QR Code.
+      setMode('ocr_photo');
       setQrStatus('idle');
       setQrScanActive(false);
       setQrError(null);
@@ -86,9 +87,10 @@ export const AddressModal: React.FC<AddressModalProps> = ({
         d.label.toLowerCase().includes('environment')
       ) || videoDevices[0];
 
-      const constraints: MediaStreamConstraints = cam.deviceId
-        ? { video: { deviceId: { exact: cam.deviceId } } }
-        : { video: { facingMode: { ideal: 'environment' } } };
+      const video = cam.deviceId
+        ? { deviceId: { exact: cam.deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+      const constraints: MediaStreamConstraints = { video };
 
       return await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err: any) {
@@ -223,7 +225,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
     videoRef.current.srcObject = liveStream;
     videoRef.current.setAttribute('playsinline', 'true');
     await videoRef.current.play().catch(() => {});
-    setOcrStatus('Aponte a câmera para os dados do destinatário na etiqueta');
+    setOcrStatus('Enquadre o CEP, o nome e o endereço da etiqueta');
   };
 
   const handleCaptureOCR = async () => {
@@ -440,8 +442,8 @@ export const AddressModal: React.FC<AddressModalProps> = ({
               }}>
                 <ScanLine size={16} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>Aponte a câmera para o bloco "DESTINATÁRIO"</strong> da etiqueta e clique em "Capturar e Ler".
-                  O sistema extrai o nome, CEP e endereço automaticamente.
+                  <strong>Enquadre o CEP, nome e endereço</strong> da etiqueta e clique em "Capturar e Ler".
+                  Funciona mesmo quando a etiqueta não traz o título "DESTINATÁRIO".
                 </span>
               </div>
 
@@ -451,7 +453,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                 active={!ocrLoading}
                 status={ocrLoading ? 'scanning' : 'idle'}
                 error={null}
-                scanLabel="Enquadre o bloco DESTINATÁRIO"
+                scanLabel="Enquadre CEP, nome e endereço"
               />
 
               {ocrStatus && (

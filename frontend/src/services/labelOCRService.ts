@@ -3,9 +3,9 @@
  * Usa Tesseract.js para reconhecer texto em fotos de etiquetas Anjun/Shein/Temu.
  *
  * Estratégia de extração:
- * 1. Pré-processa a imagem (escala de cinza + contraste alto) para melhorar OCR
- * 2. Localiza o bloco "DESTINATÁRIO" como âncora
- * 3. Lê APENAS as linhas entre "DESTINATÁRIO" e a próxima seção (REMETENTE, DEVOLUÇÃO, etc.)
+ * 1. Recorta a área central enquadrada na câmera e amplia o texto
+ * 2. Mantém tons de cinza para não perder texto fraco em plástico brilhante
+ * 3. Localiza o endereço por CEP, cidade/UF e logradouro; "DESTINATÁRIO" é opcional
  * 4. Aplica parser específico para os formatos Shein e Temu
  */
 
@@ -23,41 +23,41 @@ export interface OCRResult {
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Converte imagem para escala de cinza de alto contraste.
- * Isso melhora drasticamente a leitura do OCR em etiquetas impressas.
+ * Recorta a região central exibida no enquadramento e aplica contraste suave.
+ * O threshold binário foi removido: ele apagava texto cinza em etiquetas sob plástico.
  */
 export function preprocessImageForOCR(source: HTMLCanvasElement | HTMLVideoElement): Blob {
-  const canvas = document.createElement('canvas');
   const isVideo = source instanceof HTMLVideoElement;
-  canvas.width = isVideo ? source.videoWidth : source.width;
-  canvas.height = isVideo ? source.videoHeight : source.height;
+  const sourceWidth = isVideo ? source.videoWidth : source.width;
+  const sourceHeight = isVideo ? source.videoHeight : source.height;
+  const cropX = Math.round(sourceWidth * 0.1);
+  const cropY = Math.round(sourceHeight * 0.12);
+  const cropWidth = Math.round(sourceWidth * 0.8);
+  const cropHeight = Math.round(sourceHeight * 0.76);
+
+  const canvas = document.createElement('canvas');
+  // Escala extra preserva detalhes de texto pequeno antes do OCR.
+  canvas.width = cropWidth * 2;
+  canvas.height = cropHeight * 2;
 
   const ctx = canvas.getContext('2d')!;
 
-  // Fundo branco
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source as any, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
-  // Desenhar fonte
-  ctx.drawImage(source as any, 0, 0, canvas.width, canvas.height);
-
-  // Converter para escala de cinza de alto contraste
+  // Escala de cinza com contraste suave, sem eliminar tons intermediários.
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imageData.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    // Luminância
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    // Threshold binário (>128 = branco, <=128 = preto) para máximo contraste
-    const bin = lum > 140 ? 255 : 0;
-    data[i] = bin;
-    data[i + 1] = bin;
-    data[i + 2] = bin;
+    const enhanced = Math.max(0, Math.min(255, (lum - 128) * 1.35 + 128));
+    data[i] = enhanced;
+    data[i + 1] = enhanced;
+    data[i + 2] = enhanced;
   }
 
   ctx.putImageData(imageData, 0, 0);
 
-  // Retornar como blob (sincrono via dataURL)
   const dataURL = canvas.toDataURL('image/png');
   return dataURLtoBlob(dataURL);
 }
@@ -101,12 +101,7 @@ export async function extractTextFromImage(source: Blob | File | string): Promis
 
   const { data } = await worker.recognize(source);
   const rawText = data.text;
-
-  // Extrair apenas o bloco do destinatário
-  const destinatarioBlock = extractDestinatarioBlock(rawText);
-
-  // Parsear o bloco
-  const parsed = parseDestinatarioBlock(destinatarioBlock || rawText);
+  const { block: destinatarioBlock, parsed } = parseLabelText(rawText, true);
 
   return {
     raw: rawText,
@@ -114,6 +109,19 @@ export async function extractTextFromImage(source: Blob | File | string): Promis
     parsed,
     confidence: Math.round(data.confidence),
   };
+}
+
+/**
+ * Extrai o endereço do texto OCR completo. Funciona com e sem o título
+ * "DESTINATÁRIO", comum nas variações de etiqueta Temu e Shein.
+ */
+export function parseLabelText(rawText: string): ParsedAddress | null;
+export function parseLabelText(rawText: string, includeBlock: true): { block: string; parsed: ParsedAddress | null };
+export function parseLabelText(rawText: string, includeBlock = false): ParsedAddress | null | { block: string; parsed: ParsedAddress | null } {
+  const block = extractAddressWindow(rawText) || extractDestinatarioBlock(rawText) || rawText;
+  const parsed = parseDestinatarioBlock(block);
+
+  return includeBlock ? { block, parsed } : parsed;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -157,8 +165,6 @@ function extractDestinatarioBlock(rawText: string): string | null {
     /DEVOLU[CÇ][AÃ]O/i,
     /instru[cç][aã]o/i,
     /Declara[cç][aã]o/i,
-    /Data de publica/i,
-    /Emiss[aã]o/i,
     /Assinatura/i,
     /Recebedor/i,
     /SC-W-H001/i,  // código de warehouse (cabeçalho)
@@ -187,6 +193,25 @@ function extractDestinatarioBlock(rawText: string): string | null {
   return block || null;
 }
 
+/**
+ * Seleciona uma janela textual em torno do CEP ou do logradouro. Essa é a
+ * informação mais estável nas etiquetas Temu/Shein, inclusive sem cabeçalho.
+ */
+function extractAddressWindow(rawText: string): string | null {
+  const lines = rawText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 1);
+
+  const anchorIndex = lines.findIndex(line => extractCEP(line) || looksLikeStreet(line));
+  if (anchorIndex === -1) return null;
+
+  // Inclui nome/telefone antes do CEP e a continuação de complemento/bairro depois.
+  return lines.slice(Math.max(0, anchorIndex - 3), Math.min(lines.length, anchorIndex + 4)).join('\n');
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Parser do bloco do destinatário
 // ─────────────────────────────────────────────────────────────────
@@ -198,9 +223,10 @@ const SKIP_PATTERNS = [
   /^\d{4,}\*+$/,             // telefone mascarado 5199255****
   /^CN$/i,                   // indicador de país
   /^880$/,                   // código de rota Anjun
-  /^\d{3,4}$/,               // códigos numéricos curtos
   /^PRC$/i,                  // serviço
+  /^servi[cç]o\s*:/i,       // "Serviço: express" (cabeçalho, não endereço)
   /SC\/\d+/i,                // SC/1115
+  /^AJ\d{10,}/i,             // código de rastreio Anjun
   /^[A-Z]{2}-[A-Z]-[AH]\d+/i, // padrões de código
 ];
 
@@ -246,7 +272,7 @@ function looksLikePersonName(line: string): boolean {
  * Verifica se uma linha parece ser um logradouro
  */
 function looksLikeStreet(line: string): boolean {
-  return /^(rua|r\.|av\.|avenida|servidao|servidão|travessa|rod\.|rodovia|estrada|alameda|serv\.|sd\.)/i.test(line.trim());
+  return /^(rua\b|r\.|av(?:\.|\s)|avenida\b|servidao\b|servidão\b|travessa\b|rod(?:\.|\s)|rodovia\b|estrada\b|alameda\b|serv\.|sd\.)/i.test(line.trim());
 }
 
 /**
@@ -379,7 +405,7 @@ export function parseDestinatarioBlock(block: string): ParsedAddress | null {
       !looksLikeStreet(l) &&
       !/^\d/.test(l) &&
       l.length >= 3 && l.length <= 50 &&
-      !looksLikePersonName(l) // bairro não parece nome próprio completo
+      (!looksLikePersonName(l) || /\/(?:[^/]+)$/.test(l))
     ) {
       // Remove prefixo "R " ou "Rua "
       let bairro = l.replace(/^[Rr]\.?\s+/, '').trim();
@@ -390,6 +416,24 @@ export function parseDestinatarioBlock(block: string): ParsedAddress | null {
       }
       if (bairro.length >= 3 && !/BRAZIL/i.test(bairro)) {
         result.neighborhood = bairro;
+        result.confidence = (result.confidence || 0) + 10;
+        usedIndices.add(i);
+        break;
+      }
+    }
+  }
+
+  // Temu frequentemente quebra "Av Pequeno Príncipe Campeche" em duas linhas.
+  // Quando isso ocorre, o último termo é o bairro e a parte anterior completa o endereço.
+  if (!result.neighborhood) {
+    const streetIndex = lines.findIndex(looksLikeStreet);
+    for (let i = streetIndex + 1; i < lines.length; i++) {
+      if (usedIndices.has(i)) continue;
+      const words = lines[i].split(/\s+/);
+      if (words.length === 2 && !extractCEP(lines[i]) && !extractUF(lines[i]) && !/^\d/.test(lines[i])) {
+        result.neighborhood = words[1];
+        result.complement = result.complement || '';
+        if (result.complement) result.complement = `${result.complement} ${words[0]}`.trim();
         result.confidence = (result.confidence || 0) + 10;
         usedIndices.add(i);
         break;
