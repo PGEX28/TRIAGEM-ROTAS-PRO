@@ -40,21 +40,37 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     }
 
     // Busca perfil com role e org
-    const { data: profile, error: profileError } = await supabaseAnon
+    let { data: profile } = await supabaseAnon
       .from('user_profiles')
       .select('organization_id, role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (profileError || !profile) {
-      return res.status(401).json({ error: 'Perfil de usuário não encontrado' });
+    // Se o perfil ainda não existir, cria automaticamente para a organização padrão
+    if (!profile) {
+      const defaultOrgId = process.env.DEFAULT_ORG_ID || '00000000-0000-0000-0000-000000000001';
+      const fullName = (user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Operador');
+      
+      const { data: newProfile } = await supabaseAnon
+        .from('user_profiles')
+        .insert({
+          id: user.id,
+          organization_id: defaultOrgId,
+          role: 'admin',
+          full_name: fullName,
+          is_active: true,
+        })
+        .select('organization_id, role')
+        .maybeSingle();
+
+      profile = newProfile || { organization_id: defaultOrgId, role: 'admin' };
     }
 
     req.user = {
       id: user.id,
       email: user.email || '',
-      organization_id: profile.organization_id,
-      role: profile.role,
+      organization_id: profile.organization_id || '00000000-0000-0000-0000-000000000001',
+      role: profile.role || 'admin',
     };
 
     next();
