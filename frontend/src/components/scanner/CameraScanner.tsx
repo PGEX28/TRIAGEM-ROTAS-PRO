@@ -15,72 +15,128 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ isOpen, onClose, o
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const controlsRef = useRef<any>(null);
 
+  // 1. Inicializar lista de câmeras e pedir permissão
   useEffect(() => {
-    if (!isOpen) {
-      if (controlsRef.current) {
-        controlsRef.current.stop();
-      }
-      return;
-    }
+    if (!isOpen) return;
 
-    const initCamera = async () => {
+    let isMounted = true;
+    setLoading(true);
+    setError(null);
+
+    const startCamera = async () => {
       try {
-        setError(null);
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        setCameras(devices);
+        // Solicita permissão explícita com preferência para câmera traseira
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+        });
 
-        // Prefer back/environment camera
-        const backCamera = devices.find((d) =>
-          d.label.toLowerCase().includes('back') ||
-          d.label.toLowerCase().includes('traseira') ||
-          d.label.toLowerCase().includes('environment')
-        ) || devices[0];
+        // Libera a stream de teste para listar dispositivos com labels
+        stream.getTracks().forEach((track) => track.stop());
 
-        if (backCamera) {
-          setSelectedCamera(backCamera.deviceId);
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+
+        if (isMounted) {
+          setCameras(videoDevices);
+
+          // Procura câmera traseira
+          const backCam = videoDevices.find((d) =>
+            d.label.toLowerCase().includes('back') ||
+            d.label.toLowerCase().includes('traseira') ||
+            d.label.toLowerCase().includes('environment') ||
+            d.label.toLowerCase().includes('0')
+          ) || videoDevices[0];
+
+          if (backCam) {
+            setSelectedCamera(backCam.deviceId);
+          } else {
+            setSelectedCamera('default');
+          }
+          setLoading(false);
         }
       } catch (err: any) {
-        setError('Não foi possível acessar a câmera do dispositivo.');
+        console.error('Erro ao acessar permissão de câmera:', err);
+        if (isMounted) {
+          setError(
+            err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+              ? 'Permissão da câmera negada. Permita o acesso à câmera nas configurações do navegador.'
+              : 'Não foi possível acessar a câmera do dispositivo.'
+          );
+          setLoading(false);
+        }
       }
     };
 
-    initCamera();
+    startCamera();
 
     return () => {
+      isMounted = false;
       if (controlsRef.current) {
-        controlsRef.current.stop();
+        try {
+          controlsRef.current.stop();
+        } catch {}
       }
     };
   }, [isOpen]);
 
+  // 2. Iniciar decodificação contínua no elemento de vídeo
   useEffect(() => {
-    if (!isOpen || !selectedCamera || !videoRef.current) return;
+    if (!isOpen || !videoRef.current || loading || error) return;
 
     const codeReader = new BrowserMultiFormatReader();
+    codeReaderRef.current = codeReader;
 
-    codeReader.decodeFromVideoDevice(
-      selectedCamera,
-      videoRef.current,
-      (result, _err, controls) => {
-        controlsRef.current = controls;
-        if (result) {
-          onScan(result.getText());
-          controls.stop();
-          onClose();
-        }
-      }
-    ).catch((err) => {
-      console.warn('Erro ao iniciar stream de vídeo:', err);
-    });
+    const constraints: MediaStreamConstraints = selectedCamera && selectedCamera !== 'default'
+      ? { video: { deviceId: { exact: selectedCamera } } }
+      : { video: { facingMode: { ideal: 'environment' } } };
+
+    navigator.mediaDevices
+      .getUserMedia(constraints)
+      .then((stream) => {
+        if (!videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true'); // Essencial para iOS/Android
+        videoRef.current.play();
+
+        // Inicia decodificação do elemento de vídeo
+        codeReader.decodeFromVideoElement(
+          videoRef.current,
+          (result, _err, controls) => {
+            controlsRef.current = controls;
+            if (result) {
+              const text = result.getText();
+              if (text) {
+                onScan(text);
+                // Parar stream
+                stream.getTracks().forEach((track) => track.stop());
+                if (controls) controls.stop();
+                onClose();
+              }
+            }
+          }
+        );
+      })
+      .catch((err) => {
+        console.error('Erro ao conectar stream de vídeo:', err);
+        setError('Falha ao abrir a imagem da câmera. Tente selecionar outra câmera.');
+      });
 
     return () => {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+      }
       if (controlsRef.current) {
-        controlsRef.current.stop();
+        try {
+          controlsRef.current.stop();
+        } catch {}
       }
     };
-  }, [isOpen, selectedCamera, onScan, onClose]);
+  }, [isOpen, selectedCamera, loading, error, onScan, onClose]);
 
   if (!isOpen) return null;
 
