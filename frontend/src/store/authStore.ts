@@ -17,9 +17,28 @@ interface AuthState {
   signOut: () => Promise<void>;
 }
 
+// Tenta restaurar sessão síncrona se disponível no localStorage
+const getStoredUser = (): User | null => {
+  try {
+    const raw = localStorage.getItem('sb-rfmneqarwmlestzszwwv-auth-token');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.user) {
+        return {
+          id: parsed.user.id,
+          email: parsed.user.email || '',
+        };
+      }
+    }
+  } catch {}
+  return null;
+};
+
+const initialUser = getStoredUser();
+
 export const useAuthStore = create<AuthState>((set) => {
-  // Configurar listener imediatamente na instanciação do store
-  supabase.auth.onAuthStateChange((_event, session) => {
+  // Listener do Supabase para capturar redirecionamento do Google OAuth instantaneamente
+  supabase.auth.onAuthStateChange((event, session) => {
     if (session?.user) {
       set({
         user: {
@@ -29,18 +48,21 @@ export const useAuthStore = create<AuthState>((set) => {
         isAuthenticated: true,
         isLoading: false,
       });
+      // Limpa os parâmetros de hash da URL
       if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
         window.history.replaceState(null, '', window.location.pathname);
       }
-    } else {
+    } else if (event === 'SIGNED_OUT') {
       set({ user: null, isAuthenticated: false, isLoading: false });
+    } else {
+      set({ isLoading: false });
     }
   });
 
   return {
-    user: null,
-    isAuthenticated: false,
-    isLoading: true,
+    user: initialUser,
+    isAuthenticated: !!initialUser,
+    isLoading: !initialUser && typeof window !== 'undefined' && window.location.hash.includes('access_token'),
     setUser: (user) => set({ user, isAuthenticated: !!user, isLoading: false }),
     checkAuth: async () => {
       try {
@@ -55,10 +77,7 @@ export const useAuthStore = create<AuthState>((set) => {
             isLoading: false,
           });
         } else {
-          // Se não houver sessão ativa nem hash na URL, encerra o loading
-          if (typeof window !== 'undefined' && !window.location.hash.includes('access_token')) {
-            set({ user: null, isAuthenticated: false, isLoading: false });
-          }
+          set({ user: null, isAuthenticated: false, isLoading: false });
         }
       } catch (error) {
         console.error('Error in checkAuth:', error);
