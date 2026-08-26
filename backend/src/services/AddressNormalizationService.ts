@@ -410,9 +410,10 @@ export class AddressNormalizationService {
   static async findExisting(
     orgId: string,
     normalizedKey: string,
-    zipCode?: string
+    zipCode?: string,
+    streetNumber?: string  // NOVO: número da casa como hard constraint
   ): Promise<string | null> {
-    // 1. Match exato por CEP + chave
+    // 1. Match exato por CEP + chave (mais preciso)
     if (zipCode) {
       const cleanZip = zipCode.replace(/\D/g, '');
       const { data } = await supabase
@@ -426,7 +427,7 @@ export class AddressNormalizationService {
       if (data) return data.id;
     }
 
-    // 2. Match exato por chave
+    // 2. Match exato por chave normalizada
     const { data: exact } = await supabase
       .from('addresses')
       .select('id')
@@ -436,15 +437,31 @@ export class AddressNormalizationService {
       .single();
     if (exact) return exact.id;
 
-    // 3. Busca por similaridade usando RPC do banco
-    const { data: similar } = await supabase
-      .rpc('find_matching_address', {
-        p_org_id: orgId,
-        p_normalized_key: normalizedKey,
-        p_zip_code: zipCode || null,
-        p_similarity_threshold: 0.82,
-      });
-    if (similar) return similar as string;
+    // 3. Busca por similaridade — SOMENTE se o número da casa for o mesmo
+    // Endereços com números diferentes são SEMPRE pontos de entrega distintos.
+    // Ex: "Rua X, 319" e "Rua X, 177" NUNCA podem ser mesclados, mesmo com 0.95 de similarity.
+    if (streetNumber) {
+      const { data: similar } = await supabase
+        .rpc('find_matching_address_strict', {
+          p_org_id: orgId,
+          p_normalized_key: normalizedKey,
+          p_zip_code: zipCode || null,
+          p_street_number: streetNumber.trim(),
+          p_similarity_threshold: 0.85,
+        });
+      if (similar) return similar as string;
+    }
+    // Sem número: fallback ao RPC original sem constraint (casos sem número na etiqueta)
+    else {
+      const { data: similar } = await supabase
+        .rpc('find_matching_address', {
+          p_org_id: orgId,
+          p_normalized_key: normalizedKey,
+          p_zip_code: zipCode || null,
+          p_similarity_threshold: 0.90, // threshold mais alto quando não há número para filtrar
+        });
+      if (similar) return similar as string;
+    }
 
     return null;
   }
@@ -472,7 +489,7 @@ export class AddressNormalizationService {
       zip_code: zipNormalized,
     });
 
-    const existingId = await this.findExisting(orgId, normalizedKey, zipNormalized);
+    const existingId = await this.findExisting(orgId, normalizedKey, zipNormalized, cleanNumber || undefined);
     if (existingId) {
       return { id: existingId, isNew: false };
     }
