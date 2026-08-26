@@ -25,8 +25,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkAuth: async () => {
     try {
       set({ isLoading: true });
-      const { data: { session } } = await supabase.auth.getSession();
+
+      // 1. Check current session
+      const { data: { session }, error } = await supabase.auth.getSession();
       
+      if (error) {
+        console.error('Error getting session:', error);
+      }
+
       if (session?.user) {
         set({
           user: {
@@ -34,31 +40,34 @@ export const useAuthStore = create<AuthState>((set) => ({
             email: session.user.email || '',
           },
           isAuthenticated: true,
+          isLoading: false,
         });
       } else {
-        set({ user: null, isAuthenticated: false });
+        set({ user: null, isAuthenticated: false, isLoading: false });
       }
 
-      // Listen for auth changes (useful for Google OAuth redirects)
-      supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
+      // 2. Listen for auth changes (including OAuth hash redirect callback)
+      supabase.auth.onAuthStateChange((event, newSession) => {
+        if (newSession?.user) {
           set({
             user: {
-              id: session.user.id,
-              email: session.user.email || '',
+              id: newSession.user.id,
+              email: newSession.user.email || '',
             },
             isAuthenticated: true,
             isLoading: false,
           });
-        } else {
+          // Clean hash from URL if present
+          if (window.location.hash.includes('access_token')) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        } else if (event === 'SIGNED_OUT') {
           set({ user: null, isAuthenticated: false, isLoading: false });
         }
       });
     } catch (error) {
-      console.error('Error checking auth:', error);
-      set({ user: null, isAuthenticated: false });
-    } finally {
-      set({ isLoading: false });
+      console.error('Error in checkAuth:', error);
+      set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
   signOut: async () => {
