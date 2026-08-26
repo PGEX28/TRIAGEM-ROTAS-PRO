@@ -28,7 +28,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
-        // Here we could fetch additional profile data if needed
         set({
           user: {
             id: session.user.id,
@@ -39,6 +38,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       } else {
         set({ user: null, isAuthenticated: false });
       }
+
+      // Listen for auth changes (useful for Google OAuth redirects)
+      supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          set({
+            user: {
+              id: session.user.id,
+              email: session.user.email || '',
+            },
+            isAuthenticated: true,
+            isLoading: false,
+          });
+        } else {
+          set({ user: null, isAuthenticated: false, isLoading: false });
+        }
+      });
     } catch (error) {
       console.error('Error checking auth:', error);
       set({ user: null, isAuthenticated: false });
