@@ -1,0 +1,14 @@
+{
+  "name": "projeto-caponi-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Caponi Logística — Plataforma de Triagem e Roteirização",
+  "scripts": {
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build:all": "npm run build:frontend && npm run build:backend",
+    "desktop:install": "cd desktop && npm install",
+    "desktop:start": "npm run build:all && cd desktop && npm start",
+    "desktop:exe": "npm run build:all && cd desktop && npm run build:win"
+  }
+}

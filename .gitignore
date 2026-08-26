@@ -1,0 +1,43 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+print-agent/.env
+
+# Dependencies
+node_modules
+*/node_modules
+
+# Build outputs
+dist
+*/dist
+dist-electron
+*/dist-electron
+dist-ssr
+build
+*/build
+
+# Logs
+*.log
+logs
+*/logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor & OS files
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary test outputs
+backend/TESTE_*.csv
+TESTE_*.csv

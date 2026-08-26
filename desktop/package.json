@@ -1,0 +1,58 @@
+{
+  "name": "rotas-pro-desktop",
+  "version": "1.0.0",
+  "description": "Rotas Pro — Sistema de Triagem e Roteirização",
+  "main": "src/main.js",
+  "author": "Rotas Pro",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "cross-env": "^7.0.3",
+    "wait-on": "^7.2.0"
+  },
+  "devDependencies": {
+    "electron": "^29.1.5",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "br.com.rotaspro.triage",
+    "productName": "Rotas Pro",
+    "copyright": "Copyright © 2026 Rotas Pro",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/**/*",
+      "../backend/dist/**/*",
+      "../backend/node_modules/**/*",
+      "../backend/.env",
+      "../frontend/dist/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "sign": null,
+      "signingHashAlgorithms": null,
+      "certificateFile": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rotas Pro"
+    }
+  }
+}
