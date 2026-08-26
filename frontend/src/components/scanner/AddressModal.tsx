@@ -236,14 +236,19 @@ export const AddressModal: React.FC<AddressModalProps> = ({
     setOcrStatus('Capturando imagem...');
 
     try {
-      const blob = await captureFromCamera(videoRef.current);
+      // captureFromCamera agora retorna Blob diretamente (com pré-processamento)
+      const blob = captureFromCamera(videoRef.current);
       stopCamera();
 
-      setOcrStatus('Lendo texto da etiqueta (OCR)... aguarde');
+      setOcrStatus('Lendo texto da etiqueta (OCR)... aguarde ~5s');
 
-      const { parsed, confidence } = await extractTextFromImage(blob);
+      const { parsed, raw, destinatarioBlock } = await extractTextFromImage(blob);
 
-      if (parsed && parsed.confidence >= 25) {
+      // Log do bloco extraído para debug
+      console.log('OCR bloco destinatário:', destinatarioBlock || 'NÃO ENCONTRADO');
+      console.log('OCR parsed:', parsed);
+
+      if (parsed) {
         let filled = {
           recipientName: parsed.recipientName || '',
           zipCode: parsed.zipCode || '',
@@ -255,11 +260,12 @@ export const AddressModal: React.FC<AddressModalProps> = ({
           state: parsed.state || '',
         };
 
-        // Enriquecer com ViaCEP se tiver CEP
-        if (filled.zipCode && (!filled.street || !filled.city)) {
+        // Sempre enriquecer com ViaCEP quando há CEP — garante rua, bairro e cidade corretos
+        if (filled.zipCode) {
+          setOcrStatus('Consultando ViaCEP para completar endereço...');
           const viaCep = await fetchAddressByZip(filled.zipCode.replace(/\D/g, ''));
           if (viaCep) {
-            filled.street = viaCep.logradouro || filled.street;
+            if (!filled.street || filled.street.length < 5) filled.street = viaCep.logradouro || filled.street;
             filled.neighborhood = viaCep.bairro || filled.neighborhood;
             filled.city = viaCep.localidade || filled.city;
             filled.state = viaCep.uf || filled.state;
@@ -268,16 +274,23 @@ export const AddressModal: React.FC<AddressModalProps> = ({
 
         setFormData(filled);
         setQrStatus('success');
-        setMode(filled.recipientName && (filled.zipCode || filled.city) ? 'confirm' : 'manual');
+
+        // Vai para confirmar se tem nome + (CEP ou cidade) — mesmo com confidence baixo
+        if (filled.recipientName && (filled.zipCode || filled.city !== 'Florianópolis')) {
+          setMode('confirm');
+        } else {
+          setMode('manual');
+          setOcrStatus('Dados parcialmente lidos. Complete os campos em branco.');
+        }
       } else {
-        // OCR não conseguiu extrair dados suficientes
-        setFormData(prev => ({ ...prev }));
+        // OCR não extraiu nada útil — vai para manual mostrando o texto bruto para o usuário
+        console.warn('OCR falhou. Texto bruto:', raw);
         setMode('manual');
-        setOcrStatus(`Não foi possível extrair todos os dados (confiança: ${confidence}%). Preencha manualmente.`);
+        setOcrStatus('OCR não reconheceu a etiqueta. Certifique-se de enquadrar apenas o bloco "DESTINATÁRIO" e tente novamente, ou preencha manualmente.');
       }
     } catch (err: any) {
       console.error('Erro no OCR:', err);
-      setOcrStatus('Erro no OCR. Preencha manualmente.');
+      setOcrStatus('Erro no processamento. Tente novamente ou preencha manualmente.');
       setMode('manual');
     } finally {
       setOcrLoading(false);
