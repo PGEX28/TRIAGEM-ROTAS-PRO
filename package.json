@@ -1,11 +1,17 @@
 {
-  "name": "projeto-caponi-monorepo",
+  "name": "triagem-rotas-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "Caponi Logística — Plataforma de Triagem e Roteirização",
+  "description": "Rotas Pro — Plataforma de Triagem e Roteirização",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "desktop",
+    "print-agent"
+  ],
   "scripts": {
-    "build:frontend": "cd frontend && npm run build",
-    "build:backend": "cd backend && npm run build",
+    "build:frontend": "npm --workspace=frontend run build",
+    "build:backend": "npm --workspace=backend run build",
     "build:all": "npm run build:frontend && npm run build:backend",
     "desktop:install": "cd desktop && npm install",
     "desktop:start": "npm run build:all && cd desktop && npm start",
