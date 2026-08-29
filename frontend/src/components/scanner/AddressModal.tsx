@@ -6,6 +6,7 @@ import { fetchAddressByZip } from '../../services/addressLookup';
 import { parseAnjunQR, looksLikeAddressQR } from '../../services/anjunQrParser';
 import { captureFromCamera, extractTextFromImage } from '../../services/labelOCRService';
 import { extractAddressWithAI } from '../../services/aiVisionService';
+import { formatVisionFallbackStatus } from '../../services/aiVisionEligibility';
 import { api } from '../../lib/api';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { Camera, QrCode, ChevronDown, X, CheckCircle, ScanLine, FileText } from 'lucide-react';
@@ -244,13 +245,14 @@ export const AddressModal: React.FC<AddressModalProps> = ({
       stopCamera();
 
       setOcrStatus('Lendo etiqueta com IA...');
-      let parsed = await extractAddressWithAI(blob);
+      const aiResult = await extractAddressWithAI(blob);
+      let parsed = aiResult.address;
       let raw = '';
 
       if (parsed) {
         console.log('Endereço lido por IA:', parsed);
       } else {
-        setOcrStatus('IA indisponível ou leitura inconclusiva. Tentando OCR local...');
+        setOcrStatus(formatVisionFallbackStatus(aiResult.error));
         const ocrResult = await extractTextFromImage(blob);
         parsed = ocrResult.parsed;
         raw = ocrResult.raw;

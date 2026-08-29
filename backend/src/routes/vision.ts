@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { extractAddressWithAI } from '../services/AIVisionService';
+import { extractAddressWithGemini } from '../services/GeminiVisionService';
 
 const router = Router();
 router.use(authenticate);
@@ -11,16 +12,19 @@ router.post('/extract-address', async (req, res) => {
     return res.status(400).json({ error: 'Envie uma foto válida da etiqueta.' });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  const provider = process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null;
+  if (!provider) {
     return res.status(503).json({ available: false, error: 'OCR por IA ainda não está configurado.' });
   }
 
   try {
-    const address = await extractAddressWithAI(imageDataUrl);
-    return res.json({ available: true, address });
+    const address = provider === 'Gemini'
+      ? await extractAddressWithGemini(imageDataUrl)
+      : await extractAddressWithAI(imageDataUrl);
+    return res.json({ available: true, provider, address });
   } catch (error: any) {
-    console.error('Erro no OCR por IA:', error.message);
-    return res.status(502).json({ error: 'Não foi possível ler esta etiqueta com IA.' });
+    console.error(`Erro no OCR por IA (${provider}):`, error.message);
+    return res.status(502).json({ error: `${provider} não conseguiu ler esta etiqueta. ${error.message}` });
   }
 });
 
