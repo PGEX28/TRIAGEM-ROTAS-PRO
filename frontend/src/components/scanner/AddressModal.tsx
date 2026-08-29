@@ -5,6 +5,7 @@ import { Input } from '../ui/Input';
 import { fetchAddressByZip } from '../../services/addressLookup';
 import { parseAnjunQR, looksLikeAddressQR } from '../../services/anjunQrParser';
 import { captureFromCamera, extractTextFromImage } from '../../services/labelOCRService';
+import { extractAddressWithAI } from '../../services/aiVisionService';
 import { api } from '../../lib/api';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { Camera, QrCode, ChevronDown, X, CheckCircle, ScanLine, FileText } from 'lucide-react';
@@ -242,13 +243,20 @@ export const AddressModal: React.FC<AddressModalProps> = ({
       const blob = captureFromCamera(videoRef.current);
       stopCamera();
 
-      setOcrStatus('Lendo texto da etiqueta (OCR)... aguarde ~5s');
+      setOcrStatus('Lendo etiqueta com IA...');
+      let parsed = await extractAddressWithAI(blob);
+      let raw = '';
 
-      const { parsed, raw, destinatarioBlock } = await extractTextFromImage(blob);
-
-      // Log do bloco extraído para debug
-      console.log('OCR bloco destinatário:', destinatarioBlock || 'NÃO ENCONTRADO');
-      console.log('OCR parsed:', parsed);
+      if (parsed) {
+        console.log('Endereço lido por IA:', parsed);
+      } else {
+        setOcrStatus('IA indisponível ou leitura inconclusiva. Tentando OCR local...');
+        const ocrResult = await extractTextFromImage(blob);
+        parsed = ocrResult.parsed;
+        raw = ocrResult.raw;
+        console.log('OCR bloco destinatário:', ocrResult.destinatarioBlock || 'NÃO ENCONTRADO');
+        console.log('OCR parsed:', parsed);
+      }
 
       if (parsed) {
         let filled = {

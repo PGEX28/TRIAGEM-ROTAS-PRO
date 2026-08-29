@@ -13,6 +13,7 @@ import exportRouter from './routes/export';
 import importRouter from './routes/import';
 import auditRouter from './routes/audit';
 import settingsRouter from './routes/settings';
+import visionRouter from './routes/vision';
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/import', importRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/vision', visionRouter);
 
 import path from 'path';
 
