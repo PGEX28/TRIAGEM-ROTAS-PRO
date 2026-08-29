@@ -45,3 +45,37 @@ test('does not call the AI when an API key is unavailable', async () => {
 
   assert.equal(result, null);
 });
+
+test('reads structured text from the raw Responses API output array', async () => {
+  const fetchMock = async () => ({
+    ok: true,
+    json: async () => ({
+      output: [{
+        type: 'message',
+        content: [{
+          type: 'output_text',
+          text: JSON.stringify({
+            recipientName: 'Camille Walendorff',
+            zipCode: '88063091',
+            street: 'Rua Corruíras',
+            number: '170',
+            complement: 'prédio cinza',
+            neighborhood: 'Campeche',
+            city: 'Florianópolis',
+            state: 'SC',
+            confidence: 95,
+          }),
+        }],
+      }],
+    }),
+  });
+
+  const result = await extractAddressWithAI(
+    'data:image/jpeg;base64,etiqueta',
+    { apiKey: 'test-key', model: 'gpt-4o-mini' },
+    fetchMock,
+  );
+
+  assert.equal(result?.recipientName, 'Camille Walendorff');
+  assert.equal(result?.zipCode, '88063-091');
+});

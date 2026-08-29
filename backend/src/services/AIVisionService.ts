@@ -64,6 +64,26 @@ function normalizeResult(value: Record<string, unknown>): DeliveryAddressAIResul
   };
 }
 
+function getResponseText(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+
+  const response = data as {
+    output_text?: unknown;
+    output?: Array<{ content?: Array<{ type?: string; text?: unknown }> }>;
+  };
+  if (typeof response.output_text === 'string') return response.output_text;
+
+  for (const item of response.output || []) {
+    for (const content of item.content || []) {
+      if (content.type === 'output_text' && typeof content.text === 'string') {
+        return content.text;
+      }
+    }
+  }
+
+  return '';
+}
+
 /**
  * Extracts delivery fields from a label image through the OpenAI Responses API.
  * The API key stays on the server; callers only send the image data URL.
@@ -106,11 +126,11 @@ export async function extractAddressWithAI(
     throw new Error(`Falha no OCR por IA (HTTP ${response.status})`);
   }
 
-  const data = await response.json() as { output_text?: string };
-  if (!data.output_text) return null;
+  const outputText = getResponseText(await response.json());
+  if (!outputText) return null;
 
   try {
-    return normalizeResult(JSON.parse(data.output_text) as Record<string, unknown>);
+    return normalizeResult(JSON.parse(outputText) as Record<string, unknown>);
   } catch {
     throw new Error('A IA retornou uma resposta inválida para a etiqueta');
   }
